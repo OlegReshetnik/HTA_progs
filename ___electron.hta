@@ -1,0 +1,909 @@
+<!DOCTYPE HTML>
+<HTML>
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<TITLE>Работа с прибором «ЭЛЕКТРОН»</TITLE>
+<HTA:APPLICATION
+	ID="hUs"
+	APPLICATIONNAME="MiniElectronApp"
+	BORDER="no"
+	INNERBORDER="no"
+	CAPTION="yes"
+	CONTEXTMENU="no"
+	ICON="electron.ico"
+	MAXIMIZEBUTTON="no"
+	MINIMIZEBUTTON="yes"
+	SCROLL="no"
+	SHOWINTASKBAR="yes"
+	SINGLEINSTANCE="yes"
+	SYSMENU="yes"
+	VERSION="1.0"
+	WINDOWSTATE="normal" />
+
+<style type="text/css">
+body, tr, td, input, select { font-family: Verdana, Arial, Helvetica; font-size: 9pt; color: #000000; }
+form { margin: 0px; padding: 0px; }
+.ff { font-size: 8pt; }
+</style>
+
+<script type="text/javascript">
+var sh_freqs = new Array(); // Частоты программы
+var sh_time; // Время частот
+
+var freqs = new Array(); // частоты гуру
+
+var sh_edit_flag = false;
+
+// *************************** COM port ******************************
+var comm = null; // com port
+var active_port; // Порт прибора
+
+function hack_delay( milliseconds )
+{
+	var start = new Date().getTime();
+	for( var i = 0; i < 1e7; i++ )
+	{
+		if( ( new Date().getTime() - start ) > milliseconds ) break;
+	}
+}
+
+function com_reg_query( port_array ) // int *port_array
+{
+	var i, HKLM = 0x80000002, sRegPath = "HARDWARE\\DEVICEMAP\\SERIALCOMM";
+	try {
+		var oLoc = new ActiveXObject("WbemScripting.SWbemLocator"); // БеЗуМиЕ кАкОе-То
+		var oSvc = oLoc.ConnectServer(null, "root\\default");
+		var oReg = oSvc.Get("StdRegProv");
+		var oMethod = oReg.Methods_.Item("EnumValues");
+		var oInParam = oMethod.InParameters.SpawnInstance_();
+		oInParam.hDefKey = HKLM;
+		oInParam.sSubKeyName = sRegPath;
+		var oOutParam = oReg.ExecMethod_(oMethod.Name, oInParam);
+		var aNames = oOutParam.sNames.toArray();
+		var aTypes = oOutParam.Types.toArray();
+
+		oMethod = oReg.Methods_.Item("GetStringValue");
+		oInParam = oMethod.InParameters.SpawnInstance_();
+		oInParam.hDefKey = HKLM;
+		oInParam.sSubKeyName = sRegPath;
+
+		for( i = 0; i < aNames.length; i++ ) {
+			if( aTypes[i] == 1 )
+			{
+				oInParam.sValueName = aNames[i];
+				oOutParam = oReg.ExecMethod_(oMethod.Name, oInParam);
+				port_array[ port_array.length ] = Number( oOutParam.sValue.substr( 3 ) );
+			}
+		}
+	}
+	catch(err) { }
+	delete oLoc;
+}
+
+function open_comm( ncomm )
+{
+	try { if( !( comm = new ActiveXObject("MSCommLib.MSComm") ) ) throw "MSCOMMLib.MSComm"; }
+	catch(e) {           
+		try { if( !( comm = new ActiveXObject("MSCommLib.MSComm.1") ) ) throw "MSCOMMLib.MSComm.1"; }
+		catch(e) { return 0; }
+	}
+	if( comm ) {
+		comm.CommPort = ncomm;
+		comm.Settings = "115200,N,8,1";
+		comm.InputLen = 1;
+		comm.InputMode = 0; }
+
+	try { comm.PortOpen = true; }
+	catch(e) {
+		delete comm;
+		return 0; }
+
+	return 1;
+}
+
+function close_comm()
+{
+	if( comm.PortOpen == true ) comm.PortOpen = false;
+	delete comm;
+}
+
+function find_comm()
+{
+	var cc, i, ports = new Array();
+
+	active_port = 0;
+	com_reg_query( ports ); // &ports[0]
+	if( ports.length == 0 ) return 0; // нет портов
+
+	for( i = 0; i < ports.length; i++ )
+	{
+		if( open_comm( ports[ i ] ) )
+		{
+			hack_delay( 2000 ); // ждем загрузчик Arduino
+			cc = comm.Input;
+			close_comm();
+			if(  cc == 'O' )
+			{
+				if( active_port == 0 ) active_port = ports[ i ];
+				else // Чудом подключены два прибора!
+				{
+					active_port = 0;
+					return 10000;
+				}
+			}
+		}
+	}
+	return active_port;
+}
+
+function open_active_com() { return open_comm( active_port ); }
+
+function outb(bb)
+{
+	while( comm.Input != 'O' );
+	comm.Output = String.fromCharCode( ( bb >> 4 ) & 15 );
+
+	while( comm.Input != 'O' );
+	comm.Output = String.fromCharCode( bb & 15 );
+	//comm.Output = String.fromCharCode( bb & 255 );
+}
+
+function outs(ss)
+{
+	outb( ss.charCodeAt(0) );
+}
+
+function ins()
+{
+	while( comm.InBufferCount == 0 );
+	return comm.Input;
+}
+
+function outb_ansi( c ) // unicode to ansi win1251
+{
+	if( c < 128 ) { outb( c ); return; } // lat
+	if( c == 1025 ) { outb( 168 ); return; } // Ё
+	if( c == 1105 ) { outb( 184 ); return; } // ё
+	if( c > 1071 ) { outb( c - 880 ); return } // other rus c > 'а' - 1
+	if( c > 1039 ) outb( c - 848 ); // other rus c > 'A' - 1
+}
+// -------------------------- end COM port ---------------------------
+
+// **************************** Pribor *******************************
+function err_open()
+{
+	save_pribor.disabled = true;
+	clear_pribor.disabled = true;
+	alert( 'Ошибка доступа к прибору!' );
+}
+
+function write_to_pribor()
+{
+	if( current_programm_name.value == 'Без имени' && schedule_select.value == 0 )
+	{
+		alert( 'Задайте имя для программы "Без имени"' )
+		return;
+	}
+
+	var i, ss, bb, nums = sh_freqs.length;
+	if( !open_active_com() ) {
+		err_open();
+		return;
+	}
+	if( ins() != 'O' ) {
+		close_comm();
+		err_open();
+		return;
+	}
+	comm.Output = 'O'; // - Ok отправим в Avr без ожидания
+	outs( 'S' ); // Команда Save
+	outb( nums ); // Длина программы
+	if( ins() != 'O' ) { // O - ok
+		close_comm();
+		alert( 'Недостаточно места!' );
+		return;
+	}
+	ss = current_programm_name.value + '                ';
+	for( i = 0; i < 15; i++ ) outb_ansi( ss.charCodeAt(i) ); // Имя программы
+	bb = Number( sh_time ); // Время
+	outb( sh_time );
+	outb( sh_time >> 8 );
+	if( current_programm_stat.checked) bb = 253;
+	else {
+		bb = Number( current_programm_count.value );
+		if( bb > 252 ) bb = 252;
+		else if( bb <= 0 ) bb = 1;
+	}
+	outb( bb );				// Счетчик проигрываний
+	for(i = 0; i < nums; i++) { // Список частот
+		bb = Number( sh_freqs[i]*100 );
+		outb( bb );
+		outb( bb >> 8 );
+		outb( bb >> 16 );
+		outb( bb >> 24 );
+	}
+	outb( 0 );
+	outb( 0 );
+	close_comm();
+}
+
+function clear_to_pribor()
+{
+	if( !open_active_com() ) {
+		err_open();
+		return;
+	}
+	if( ins() != 'O' ) {
+		close_comm();
+		err_open();
+		return;
+	}
+	comm.Output = 'O'; // - Ok отправим в Avr без ожидания
+	outs( 'C' ); // Команда Clear
+	close_comm();
+}
+
+function find_pribor()
+{
+	var cc = find_comm();
+
+	if( cc == 10000 ) {
+		if( confirm( "ВНИМАНИЕ:\nК компьютеру должен быть подключен\nTолько один прибор ЭЛЕКТРОН!\n\nВы хотите продолжить работу с программой\nбез функций работы с прибором?" ) )
+		{
+			save_pribor.disabled = true;
+			clear_pribor.disabled = true;
+		}
+		else window.close();
+	}
+	else if( cc == 0 ) {
+		if( confirm( "ВНИМАНИЕ:\Прибор ЭЛЕКТРОН не подключен!\n\nВы хотите продолжить работу с программой\nбез прибора?" ) )
+		{
+			save_pribor.disabled = true;
+			clear_pribor.disabled = true;
+		}
+		else window.close();
+	}
+}
+// -------------------------- end Pribor -----------------------------
+
+// **************************** Main DB ******************************
+var cn; // connection
+var rs; // recordset
+
+function open_DB()
+{
+	var fso = new ActiveXObject("WScript.Shell");
+	var cur_path = fso.CurrentDirectory + "\\";
+	delete fso;
+
+	var mdb = "electron.mdb";
+	var strConn = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" + cur_path + mdb + ";Persist Security Info=False"; // Подключаем к базе
+
+	try {
+		cn = new ActiveXObject("ADODB.Connection");
+		rs = new ActiveXObject("ADODB.Recordset");
+		cn.Open(strConn);
+	}
+	catch(e) { return 0; }
+	return 1;
+}
+
+function close_DB()
+{
+	cn.Close();
+	delete rs;
+	delete cn;
+}
+// -------------------------- end Main DB ----------------------------
+
+// ************************** freq info ******************************
+function get_from_db( table, desk, ask )
+{
+	var SQL, str = '', qq;
+
+	qq = "( freq LIKE '" + ask + "' OR freq LIKE '" + ask + ".%' OR freq LIKE '" + ask + ";%' OR freq LIKE '%;" + ask + ".' OR freq LIKE '%;" + ask + ";%' OR freq LIKE '%;" + ask + "' )";
+
+	SQL = "SELECT name FROM " + table + " WHERE " + qq;
+
+	rs.Open(SQL, cn);
+	if( !rs.eof ) str += '<b>' + desk + ':</b><br />';
+	while( !rs.eof )
+	{
+		str += rs.Fields(0).Value + '<br />';
+		rs.MoveNext();
+	}
+	rs.Close();
+	return str;
+}
+
+function finfo(ask_freq)
+{
+	var names = new Array();
+	var desks = new Array();
+	var ss = '', i = 0;
+
+	var SQL = "SELECT name, desc FROM Guru_tables";
+	rs.Open(SQL, cn);
+	while (!rs.eof)
+	{
+		names[i] = rs.Fields(0).Value;
+		desks[i++] = rs.Fields(1).Value;
+		rs.MoveNext();
+	}
+	rs.Close();
+
+	ss += 'Частота <b>' + ask_freq + '</b> найдена в разделах:<br /><br />';
+	for( i = 0; i < names.length; i++ ) ss += get_from_db( names[i], desks[i], ask_freq );
+
+	freq_info.innerHTML = ss;
+	freq_box.style.display = 'block'
+}
+// ------------------------ end freq info ----------------------------
+
+// ************************* all tables ******************************
+function show_all_tables_selector()
+{
+	var SQL, str, ss, first;
+
+	SQL = "SELECT name, desc FROM Guru_tables";
+	rs.Open(SQL, cn);
+
+	str = '<select name="all_tables_select" style="width: 320px" onchange="show_current_table_selector(); show_freq_list();">';
+
+	if (!rs.eof) first = rs.Fields(0).Value;
+
+	while (!rs.eof)
+	{
+		str += '<option value="' + rs.Fields(0).Value + '"';
+		if( rs.Fields(0).Value == first ) { str += ' selected'; }
+		ss = rs.Fields(1).Value;
+		str += '>' + ss + '</option>\n';
+		rs.MoveNext();
+	}
+	rs.Close();
+	str += '</select>\n';
+	all_tables_selector.innerHTML = str;
+}
+// ----------------------- end all tables ----------------------------
+
+// *********************** current table *****************************
+function show_current_table_selector()
+{
+	var SQL, str, ss, first;
+
+	SQL = "SELECT ID, name FROM " + all_tables_select.value + " ORDER BY name";
+	rs.Open(SQL, cn);
+
+	str = '<select name="current_table_select" size="20" style="width: 320px" onchange="show_freq_list()" ondblclick="add_to_programm()" >';
+
+	if (!rs.eof) first = rs.Fields(0).Value;
+
+	while (!rs.eof)
+	{
+		str += '<option value="' + rs.Fields(0).Value + '"';
+		if( rs.Fields(0).Value == first ) { str += ' selected'; }
+
+		if( rs.Fields(1).Value == null ) ss = '...нет имени';
+		else ss = rs.Fields(1).Value;
+
+		str += '>' + ss + '</option>\n';
+
+		rs.MoveNext();
+	}
+	rs.Close();
+	str += '</select>\n';
+	current_table_selector.innerHTML = str;
+}
+
+var chk = new Array(); // галочки для частот
+
+function chk_state(i)
+{
+	chk[i] = !chk[i];
+}
+
+function show_freq_list()
+{
+	var SQL, i, str = '';
+
+	SQL = "SELECT freq FROM " + all_tables_select.value + " WHERE ID = " + current_table_select.value;
+	rs.Open(SQL, cn);
+
+	if( !rs.eof && rs.Fields(0).Value != null )
+	{ 
+		freqs = rs.Fields(0).Value.split(';');
+		for( i = 0; i < freqs.length; i++ )
+		{
+			if( freqs[i] != '' )
+			{
+				str += '<input type="button" value="?" onclick="finfo(' + freqs[i] + ')"> ';
+				str += '<input type="checkbox" checked onclick="chk_state(' + i + ')"> ';
+				chk[i] = true;
+				str += freqs[i];
+				str += ' Гц<br />';
+			}
+			else chk[i] = false;
+		}
+	}
+	rs.Close();
+	freq_list.innerHTML = str;
+}
+// --------------------- end current table ---------------------------
+
+// ************************** shedule ********************************
+var prev_schedule_select_value;
+function get_prev_schedule_select_value()
+{
+	prev_schedule_select_value = schedule_select.value;
+}
+
+function show_schedule_selector()
+{
+	var SQL, str, ss;
+
+	SQL = "SELECT ID, name FROM Schedule ORDER BY name";
+	rs.Open(SQL, cn);
+
+	str = '<select name="schedule_select"  style="width: 100%;" onfocus="get_prev_schedule_select_value()" onchange="get_programm()">'; //onchange
+	str += '<option value="0" selected>Новая программа</option>';
+
+	while (!rs.eof)
+	{
+		str += '<option value="' + rs.Fields(0).Value + '">';
+
+		if( rs.Fields(1).Value == null ) str += '...нет имени';
+		else str += rs.Fields(1).Value;
+
+		str += '</option>';
+		rs.MoveNext();
+	}
+	rs.Close();
+	str += '</select>';
+	programm_selector.innerHTML = str;
+}
+
+function str_time( secs )
+{
+	var ss='', hr, mm, sc;
+
+	hr = Math.floor( secs / 3600 );
+	mn = Math.floor( (secs / 60 ) % 60 );
+	sc = secs % 60;
+	if( hr < 10 ) ss += '0';
+	ss += hr + ':';
+	if( mn < 10 ) ss += '0';
+	ss += mn + ':';
+	if( sc < 10 ) ss += '0';
+	ss += sc;
+	return ss;
+}
+
+function seconds_change()
+{
+	sh_edit_flag = true;
+	sh_time = Number(seconds.value);
+	show_programm();
+}
+
+function show_programm()
+{
+	var i, ss = '', nums;
+
+	nums = sh_freqs.length;
+
+	for(i = 0; i < nums; i ++ )
+	{
+		ss += '<input type="button" value="?" onclick="finfo(' + sh_freqs[i] + ')"> ';
+		ss += '<input type="button" value="x" onclick="remove_from_programm(' + i + ')"> ';
+		ss += ' ';
+		ss += sh_freqs[i];
+		ss += ' Гц<br />';
+	}
+	current_programm_frequlist.innerHTML = ss;
+
+	ss = 'Частот: <b>' + nums + '</b><br />';
+
+	ss += '<span title="Длительность трансляции одной частоты, секунд">Длина частоты, сек.</span> <input name = "seconds" type = "text" size = "2" value = "' + sh_time + '">'
+	ss += '<input type="button" value="ok" onclick="seconds_change();" title="Изменить время трансляции одной частоты"><br />';
+
+	ss += 'Время прогр: <b>' + str_time( sh_time * nums ) + '</b><br />';
+
+	current_programm_info.innerHTML = ss;
+}
+
+function clear_programm()
+{
+	if( confirm( 'Вы уверены, что хотите очистить\nпрограмму: "' + current_programm_name.value + '" ?' ) )
+	{
+		sh_edit_flag = true;
+		sh_freqs = [];
+		sh_time = 60;
+		show_programm();
+	}
+}
+
+function ask_programm()
+{
+	if( sh_edit_flag && confirm( 'Программа: "' + current_programm_name.value + '" изменена.\nСохранить программу?' ) )
+	{
+		put_programm();
+	}
+	else sh_edit_flag = false;
+}
+
+function get_programm()
+{
+	var curr = schedule_select.value;
+	
+	schedule_select.value = prev_schedule_select_value;
+	ask_programm()
+	schedule_select.value = curr;
+
+	var SQL, ss = '';
+
+	sh_freqs = [];
+	sh_time = 60;
+	current_programm_name.value = 'Без имени';
+	get_prev_schedule_select_value();
+	sh_edit_flag = false;
+
+	if( schedule_select.value != 0 )
+	{
+		SQL = "SELECT name, data, seconds FROM Schedule WHERE ID = " + schedule_select.value;
+		rs.Open(SQL, cn);
+		
+		if( !rs.eof )
+		{ 
+			if( rs.Fields(0).Value != null ) current_programm_name.value = rs.Fields(0).Value;
+
+			if( rs.Fields(1).Value != null )
+			{
+				ss = rs.Fields(1).Value;
+				sh_freqs = ss.split(';');
+				if( sh_freqs[ sh_freqs.length - 1 ] == '' ) ss = arrayObj.pop();
+			}
+
+			if( rs.Fields(2).Value != null ) sh_time = rs.Fields(2).Value;
+		}
+		rs.Close();
+	}
+	show_programm();
+}
+
+function copy_programm()
+{
+	var ss;
+
+	ss = sh_freqs.join(',');
+	document.parentWindow.clipboardData.setData("Text", ss );
+}
+
+function put_programm()
+{
+	var new_name, ss, SQL, nn, max_id;
+
+	ss = sh_freqs.join(';');
+	if( ss == '' )
+	{
+		alert( 'Программа "' + current_programm_name.value + '" пуста!' );
+		return;
+	}
+
+	if( current_programm_name.value == 'Без имени' )
+	{
+		new_name = prompt( 'Задайте имя для программы "Без имени"', "ПРОГРАММА1");
+		if( new_name == null || new_name == "" ) return;
+		current_programm_name.value = new_name;
+	}
+
+	nn = schedule_select.value;
+	if( nn == 0 ) // Новая программа
+	{
+		SQL = "SELECT ID FROM Schedule WHERE name = '" + current_programm_name.value + "'";
+		rs.Open(SQL, cn);
+		if( !rs.eof ) max_id = 1;
+		else max_id = -1;
+		rs.Close();
+		if( max_id == 1 )
+		{
+			new_name = prompt( 'Программа "' + current_programm_name.value + '" уже существует!\nЗадайте новое имя.', current_programm_name.value + "1" );
+			if( new_name == null || new_name == "" || new_name == current_programm_name.value ) return;
+			else current_programm_name.value = new_name;
+		}
+		SQL = "SELECT max(ID) FROM Schedule";
+		rs.Open(SQL, cn);
+		max_id = rs.Fields(0).Value + 1;
+		rs.Close();
+		SQL = "INSERT INTO Schedule (name, seconds, data) VALUES ('" + current_programm_name.value + "', " + sh_time + ", '" + ss + "')";
+		nn = max_id;
+		cn.Execute(SQL);
+		sh_edit_flag = false;
+	}
+	else
+	{
+		SQL = "UPDATE Schedule SET name = '" + current_programm_name.value + "', seconds = " + sh_time + ", data = '" + ss + "' WHERE ID = " + nn;
+		cn.Execute(SQL);
+		sh_edit_flag = false;
+	}
+	show_schedule_selector();
+	schedule_select.value = nn; // Установить на ту же программу
+	show_programm();
+}
+
+function del_programm()
+{
+	var SQL, nn;
+
+	if( confirm( 'Вы уверены, что хотите удалить\nпрограмму: "' + current_programm_name.value + '" ?' ) )
+	{
+		if( (nn = schedule_select.value) != 0 )
+		{
+			SQL = "DELETE FROM Schedule WHERE ID = " + nn;
+			cn.Execute(SQL);
+		}
+
+		sh_edit_flag = false;
+		show_schedule_selector();
+		get_programm();
+	}
+}
+
+function get_met_string( name )
+{
+	var fs, a, ss, so = '', flag = 0;
+
+	fs = new ActiveXObject( "Scripting.FileSystemObject" );
+	a = fs.OpenTextFile( name, 1, false, 0 );
+	
+	while( a.AtEndOfStream != true )
+	{
+		ss = a.Read(1); a.Skip(1);
+
+		if( ss == '1' && flag == 0 ) flag = 1;
+		else if( ss == '_' && flag == 1 )
+		{
+			flag = 2;
+			a.Skip(12);
+		}
+		else if( flag == 2 )
+		{
+			if( ss == String.fromCharCode( 0 ) )
+			{
+				a.Close();
+				delete fs;
+				break;
+			}
+			else so += ss;
+		}
+	}
+	a.Close();
+	delete fs;
+	return so;
+}
+
+function get_from_file( file_name )
+{
+	ask_programm(); // ask nosave programm
+
+	var p_nam, i, mass, nums;
+
+	if( file_name.indexOf(".met") > 0 )
+	{
+		mass = get_met_string( file_name ).split( ';' );
+		nums = mass.length / 2 - 1;
+		sh_freqs = [];
+		sh_time = mass[1];
+		for( i = 0; i < nums; i ++ ) sh_freqs[i] = mass[ i*2 ]*1.0;
+		p_nam = file_name.substring( file_name.lastIndexOf( '\\' ) + 1, file_name.length );
+		current_programm_name.value = p_nam.substring( 0, p_nam.lastIndexOf('.') );  // Имя файла без расширения
+		schedule_select.value = 0;
+		// Грязный хак для сброса met_file_name.value, поскольку оно только для чтения
+		file_box.innerHTML = "<input type='file' name='met_file_name' class='ff' onchange='get_from_file(met_file_name.value);'>";
+		sh_edit_flag = true;
+		show_programm();
+	}
+}
+
+function is_double(fr)
+{
+	var i;
+	for( i = 0; i < sh_freqs.length; i++ ) if( sh_freqs[i]*1.0 == fr*1.0 ) return true;
+	return false;
+}
+
+function remove_double()
+{
+	var i, j;
+
+	for( i = 0; i < sh_freqs.length; i++ )
+	{
+		for( j = i+1; j < sh_freqs.length; j++ )
+		{
+			if( sh_freqs[i]*1.0 == sh_freqs[j]*1.0 )
+			{
+				sh_freqs.splice(j,1);
+				j--;
+				sh_edit_flag = true;
+			}
+		}
+	}
+	show_programm();
+}
+
+function paste_programm()
+{
+	var i, ss;
+	var _freqs = new Array();
+
+	ss = document.parentWindow.clipboardData.getData("Text");
+	if( ss != null )
+	{
+		_freqs = ss.split(',');
+		if( _freqs[ _freqs.length - 1 ] == '' ) ss = arrayObj.pop();
+
+		ss = _freqs.length;
+		if( ss > 0 )
+		{
+			for( i = 0; i < ss; i++ )
+			{
+				if( !(is_double(_freqs[i]) && remove_duble.checked) )
+				{
+					if( !isNaN( _freqs[i] ) && _freqs[i] > 0 )
+					{
+						sh_freqs.push(_freqs[i]*1.0);
+						sh_edit_flag = true;
+					}
+				}
+			}
+			show_programm();
+		}
+	}
+}
+
+function add_to_programm()
+{
+	var i;
+
+	for( i = 0; i < freqs.length; i++ )
+	{
+		if( chk[i] )
+		{
+			if( !(is_double(freqs[i]) && remove_duble.checked) )
+			{
+				if( !isNaN( freqs[i] ) && freqs[i] > 0 )
+				{
+					sh_freqs.push(freqs[i]*1.0);
+					sh_edit_flag = true;
+				}
+			}
+		}
+	}
+	show_programm();
+}
+
+function add_man_to_programm()
+{
+	if( !(is_double(man_freq.value) && remove_duble.checked) )
+	{
+		if( !isNaN( man_freq.value ) && man_freq.value > 0 )
+		{
+			sh_freqs.push(man_freq.value*1.0);
+			sh_edit_flag = true;
+		}
+	}
+	show_programm();
+}
+
+function remove_from_programm(i)
+{
+	sh_freqs.splice(i,1);
+	sh_edit_flag = true;
+	show_programm();
+}
+// ------------------------ end shedule ------------------------------
+
+// ***************************** Init ********************************
+function resize_window()
+{
+	var wW = 610, wH = 668;
+	window.resizeTo(wW, wH); // изменяем размер
+	window.moveTo(screen.width/2-wW/2, screen.height/2-wH/2); // окно в центр экрана
+}
+
+function main_init()
+{
+	resize_window();
+	window.onresize = resize_window; // Нехрен трогать
+	window.onbeforeunload = ask_programm; // проверить несохраненную программу
+	if( !open_DB() )
+	{
+		alert( 'База данных не найдена или повреждена!' );
+		window.close();
+	}
+	show_all_tables_selector();
+	show_current_table_selector();
+	show_freq_list(); 
+	show_schedule_selector();
+	get_programm();
+	find_pribor();
+}
+// ---------------------------- end Init -----------------------------
+</script>
+</HEAD>
+<BODY align="center" style="margin: 0px; padding: 0px;" onload="main_init();">
+
+<div id="freq_box" style="padding: 2px; background-color: #FFF; overflow: auto; position: fixed; left: 0px; top: 0px; width: 100%; height: 100%; display: none; z-index: 99999999;">
+	<input type="button" value="Закрыть [X]" onclick="freq_box.style.display = 'none'; freq_info.innerHTML='';"/><br />
+	<div id="freq_info">freq</div>
+</div>
+
+<table border=1><tr>
+
+<td valign=top>
+<table border=1><tr><td>
+
+<div id="all_tables_selector">tables selector here</div>
+
+<br />
+
+<div id="current_table_selector">freq selector here</div>
+
+</td></tr>
+<tr><td>
+
+<div id="freq_list" style="width: 320px; height: 140px; overflow: auto;">freqs here</div>
+
+<input type="button" value="Добавить->" onclick="add_to_programm()" title="Добавить выбранные частоты в текущую программу"/>
+
+<span title="Не позволяет добавлять уже инеющиеся частоты"><input type="checkbox" name="remove_duble" checked />Без двойных</span><br />
+<br />
+
+<input name="man_freq" type="text" size="6" value="1.1" title="Введите частоту"/> Гц.
+
+<input type="button" value="->" onclick="add_man_to_programm()" title="Добавить введенную частоту в текущую программу"/> Вставить вручную
+
+</td></tr></table>
+</td>
+<td width=6px>&nbsp;</td>
+<td valign=top>
+
+<span id="file_box">
+<input type="file" name="met_file_name" class="ff" style="width: 100%;" onchange="get_from_file(met_file_name.value);">
+</span>
+
+<div id="programm_selector">Programm selector here</div>
+<br />
+
+Имя программы:<br />
+<input name="current_programm_name" onchange="sh_edit_flag=true;" type="text" style="width: 100%;" title="Задайте имя программе или смените имеющееся"/><br />
+
+<div id="current_programm_frequlist" style="width: 220px; height: 310px; overflow: auto;">Freq list here</div>
+
+<div id="current_programm_info">current prog info here</div>
+
+<input name="current_programm_count" type="text" size="1" value="14" title="Число возможных включений программы"/> Раз <input type="checkbox" name="current_programm_stat">Постоянно<br />
+
+<input type="button" value="Clear" onclick="clear_programm()" title="Очистить весь список частот программы!!!"/>
+
+<input type="button" value="Copy" onclick="copy_programm()" title="Копировать программу в Windows Clipboard"/>
+
+<input type="button" value="Paste" onclick="paste_programm()" title="Вставить в программу данные из Windows Clipboard"/>
+
+<input type="button" value="Save" onclick="put_programm()" title="Записать программу в базу данных поверх старой!!!"/><br />
+
+<input type="button" value="Delete" onclick="del_programm()" title="Удалить программу из базуы данных!!!"/>
+
+<input type="button" value="Удал. повторы" onclick="remove_double()" title="Удалить повторяющиеся частоты"/><br />
+
+<br />
+
+<button name="save_pribor" onclick="write_to_pribor()">ЗАПИСЬ<br />в Прибор</button>
+
+<button name="clear_pribor" onclick="clear_to_pribor()">СТЕРТЬ<br />Прибор</button>
+
+</td>
+
+</tr></table>
+
+</BODY>
+</HTML>

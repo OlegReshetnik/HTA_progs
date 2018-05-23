@@ -1,0 +1,453 @@
+<!DOCTYPE HTML>
+<HTML>
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<TITLE>Программа учета электричества Ново-Разводная</TITLE>
+<HTA:APPLICATION
+     ID="hEl"
+     APPLICATIONNAME="ElectoApp"
+     BORDER="Thick"
+     BORDERSTYLE="normal"
+     CAPTION="yes"
+     ICON="el.ico"
+     MAXIMIZEBUTTON="yes"
+     MINIMIZEBUTTON="yes"
+     SHOWINTASKBAR="yes"
+     SINGLEINSTANCE="yes"
+     SYSMENU="yes"
+     VERSION="1.0"
+     WINDOWSTATE="normal" />
+
+<style type="text/css">
+body, tr, td, input, select { font-family: Verdana, Arial, Helvetica; font-size: 10pt; color: #000055; }
+.rb { background-color: #CBEAEA; font-weight: bold; }
+.r0 { font-size: 10pt; background-color: #EBEBEB; }
+.r1 { font-size: 10pt; background-color: #FAFAFA; }
+form { margin: 0px; padding: 0px; }
+.s12b { font-size: 14pt; font-weight: bold; }
+.brd { border: .3pt #000000 solid; }
+</style>
+
+<script type="text/javascript">
+
+var chet=0;
+
+// **************************** Main DB ******************************
+var cn; // connection
+var rs; // recordset
+
+function open_DB()
+{
+	var fso = new ActiveXObject("WScript.Shell");
+	var cur_path = fso.CurrentDirectory + "\\";
+	delete fso;
+
+	var mdb = "el_db.mdb";
+	var strConn = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" + cur_path + mdb + ";Persist Security Info=False"; // Подключаем к базе
+
+	try {
+		cn = new ActiveXObject("ADODB.Connection");
+		rs = new ActiveXObject("ADODB.Recordset");
+		cn.Open(strConn);
+	}
+	catch(e) { return 0; }
+	return 1;
+}
+
+function close_DB()
+{
+	cn.Close();
+	delete rs;
+	delete cn;
+}
+// *******************************************************************
+
+function get_date()
+{
+  var td = new Date();
+  var yy = td.getFullYear();
+  var mm = td.getMonth()+1;
+  var dd = td.getDate();
+
+  if( mm < 10 ) mm = '0'+mm;
+  if( dd < 10 ) dd = '0'+dd;
+
+  return dd + '.' + mm + '.' + yy;
+}
+
+function get_one_port(u_id, m, y)
+{
+  var mn = ['','январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь',''];
+  var SQL;
+  var oldc, newc, kv, cr, tar, tax, sum, csum, tsum, psum, cd, td, pd;
+  var c_str, t_str, p_str, str;
+
+  chet++; chet %= 2;
+  var str = '<tr class="r' + chet + '"><td align="right">' + mn[m] + ' ' + y + '</td><td>';
+
+  SQL = "SELECT DatePart('d',c_data), old_cnt, new_cnt, tarif FROM counts WHERE u_id=" + u_id + " AND DatePart('yyyy',c_data) = " + y + " AND DatePart('m',c_data) = " + m;
+  rs.Open(SQL, cn);
+  c_str = ''; csum = 0;
+  while( !rs.eof )
+  {
+    cd = rs.Fields(0).Value;
+    oldc = rs.Fields(1).Value;
+    newc = rs.Fields(2).Value;
+    tar = rs.Fields(3).Value;
+    kv = newc - oldc;
+    cr = kv * tar;
+    csum += cr;
+    cr = rub(cr);
+    tar = tar.toFixed(4);
+    c_str += cd + ': (' + newc + '-' + oldc + ')-> ' + kv + ' x ' + tar + ' = ' + cr + '<br />';
+    rs.MoveNext();
+  }
+  rs.Close();
+  if( c_str == '' ) { c_str = '&nbsp;'; }
+  str += c_str + '</td><td>' + rub(csum) + '</td><td>';
+
+  SQL = "SELECT DatePart('d',t_data), t_sum FROM taxs WHERE u_id=" + u_id + " AND DatePart('yyyy',t_data) = " + y + " AND DatePart('m',t_data) = " + m;
+  rs.Open(SQL, cn);
+  t_str = ''; tsum = 0;
+  while( !rs.eof )
+  {
+    td = rs.Fields(0).Value;
+    tax = rs.Fields(1).Value;
+    tsum += tax;
+    tax = rub(tax);
+    t_str += td + ': ' + tax + '<br />';
+    rs.MoveNext();
+  }
+  rs.Close();
+  if( t_str == '' ) { t_str = '&nbsp;'; }
+  str += t_str + '</td><td>' + rub(tsum) + '</td><td>' + rub(csum+tsum) + '</td><td>';
+
+  SQL = "SELECT DatePart('d',p_data), p_sum FROM pays WHERE u_id=" + u_id + " AND DatePart('yyyy',p_data) = " + y + " AND DatePart('m',p_data) = " + m;
+  rs.Open(SQL, cn);
+  p_str = ''; psum = 0;
+  while( !rs.eof )
+  {
+    pd = rs.Fields(0).Value;
+    sum = rs.Fields(1).Value;
+    psum += sum;
+    sum = rub(sum);
+    p_str += pd + ': ' + sum + '<br />';
+    rs.MoveNext();
+  }
+  rs.Close();
+  if( p_str == '' ) { p_str = '&nbsp;'; }
+  str += p_str + '</td><td>' + rub(psum) + '</td></tr>';
+
+  return str;
+}
+
+function get_portianka(u_id, dept)
+{
+  var td = new Date();
+  var cm = td.getMonth()+1;
+  var cy = td.getFullYear();
+  var mm, yy;
+  var str;
+
+  str = '<table border=1 cellpadding=5 cellspacing=0><tr class="rb">';
+  str += '<td>Месяц</td><td>Дата: Показания (кВт/ч) x Тариф</td><td>Всего</td><td>Сборы</td><td>Всего</td><td>Итого</td><td>Сдано</td><td>Всего</td></tr>';
+  dept--;
+  while( dept >= 0 )
+  {    mm = cm - dept; yy = cy;
+    while( mm <= 0 ) { yy--; mm += 12; }
+    str += get_one_port(u_id, mm, yy);
+    if( u_id == 6 || u_id == 8 ) { str += get_one_port(7, mm, yy); }
+    dept --;
+  }
+  str += '</table>\n';
+
+  return str;
+}
+
+function get_users()
+{
+  var ret=[];
+  var SQL = "SELECT u_id, u_name, u_active FROM users";
+  rs.Open(SQL, cn);
+
+  rs.MoveFirst();
+  while (!rs.eof)
+  {    if( rs.Fields(2).Value )
+    {      ret[rs.Fields(0).Value] = rs.Fields(1).Value;
+      auto_tax_user(rs.Fields(0).Value);
+    }
+    rs.MoveNext();
+  }
+
+  rs.Close();
+
+  return ret;
+}
+
+function auto_tax_user(u_id)
+{
+  var td = new Date();
+  var dd = td.getDate();
+  var mm = td.getMonth()+1;
+  var yy = td.getFullYear();
+  var SQL, ct;
+  var tax;
+
+  if( dd < 25 ) return 0;
+
+  SQL = "SELECT u_tax FROM users WHERE u_id = " + u_id;
+  rs.Open(SQL, cn);
+  if( rs.eof ) { tax = 0; }
+  else { tax = rs.Fields(0).Value; }
+  rs.Close();
+
+  if( tax == 0 ) { cn.Close(); return 0; }
+
+  SQL = "SELECT t_sum FROM taxs WHERE u_id=" + u_id + " AND DatePart('yyyy',t_data) = " + yy + " AND DatePart('m',t_data) = " + mm;
+  rs.Open(SQL, cn);
+  if( rs.eof ) { ct = ''; }
+  else { ct = rs.Fields(0).Value; }
+  rs.Close();
+
+  if( ct == '' )
+  {    if( mm < 10 ) mm = '0' + mm;
+    var dt = dd + '.' + mm + '.' + yy;
+    var cmd = "INSERT INTO taxs (u_id, t_data, t_sum) VALUES (" + u_id + ", '" + dt + "', " + tax + ")";
+    cn.Execute(cmd);
+    return 1;
+  }
+
+  return 0;
+}
+
+function add_user_count(u_id, dt, oldc, newc, tr)
+{
+  var cmd = "INSERT INTO counts (u_id, c_data, old_cnt, new_cnt, tarif) VALUES (" + u_id + ", '" + dt + "', " + oldc + ", " + newc + ", " + tr + ")";
+  cn.Execute(cmd);
+}
+
+function add_user_pay(u_id, dt, su)
+{
+  var cmd = "INSERT INTO pays (u_id, p_data, p_sum) VALUES (" + u_id + ", '" + dt + "', " + su + ")";
+  cn.Execute(cmd);
+}
+
+function add_user_tax(u_id, dt, su)
+{
+  var cmd = "INSERT INTO taxs (u_id, t_data, t_sum) VALUES (" + u_id + ", '" + dt + "', " + su + ")";
+  cn.Execute(cmd);
+}
+
+function get_last_count(u_id) // ret[0] = data, ret[1] = count
+{
+  var ret = [];
+  var SQL = "SELECT TOP 1 Format(c_data,'dd.mm.yyyy'), new_cnt FROM counts WHERE u_id = " + u_id + " ORDER BY c_data DESC";
+  rs.Open(SQL, cn);
+  if( rs.eof ) { ret[0] = '01.01.1900'; ret[1] = 0; }
+  else { ret[0] = rs.Fields(0).Value; ret[1] = rs.Fields(1).Value; }
+  rs.Close();
+  return ret;
+}
+
+function get_tarif()
+{
+  var tar;
+  var add;
+
+  var SQL = "SELECT s_value FROM settings WHERE s_name = 'tarif'";
+  rs.Open(SQL, cn);
+  tar = rs.Fields(0).Value * 1.0;
+  rs.Close();
+
+  var SQL = "SELECT s_value FROM settings WHERE s_name = 'user_add'";
+  rs.Open(SQL, cn);
+  add = rs.Fields(0).Value / 100.0;
+  rs.Close();
+
+  return tar * (1 + add);
+}
+
+function balans(u_id)
+{  var cnt;
+  var pay;
+  var tax;
+  var SQL;
+
+  SQL = "SELECT sum( (new_cnt-old_cnt)*tarif ) FROM counts WHERE u_id = " + u_id;
+  rs.Open(SQL, cn);
+  if( rs.eof ) { cnt = 0; }
+  else { cnt = rs.Fields(0).Value; }
+  rs.Close();
+
+  SQL = "SELECT sum( p_sum ) FROM pays WHERE u_id = " + u_id;
+  rs.Open(SQL, cn);
+  if( rs.eof ) { pay = 0; }
+  else { pay = rs.Fields(0).Value; }
+  rs.Close();
+
+  SQL = "SELECT sum( t_sum ) FROM taxs WHERE u_id = " + u_id;
+  rs.Open(SQL, cn);
+  if( rs.eof ) { tax = 0; }
+  else { tax = rs.Fields(0).Value; }
+  rs.Close();
+
+  return (pay - tax - cnt);
+}
+
+function show_users()
+{
+  var usrs = get_users();
+  var str = '<select name="user" onchange="show_balans()">\n';
+
+  for(var p in usrs)
+  {    str += '<option value="' + p + '">' + usrs[p] + '</option>\n';
+  }
+
+  str += '</select>\n';
+  scr.innerHTML = str;
+}
+
+function rub(val)
+{
+  var str = val.toFixed(0);
+  return str.replace(/(\d{1,3}(?=(\d{3})+(?:\.\d|\b)))/g,"\$1 ") + ' р.';
+}
+
+function show_balans()
+{
+  var ss;
+  var ret =[];  // ret[0] = data, ret[1] = count
+
+  cnt2.style.display = 'none';
+  if( user.value == 6 )
+  {    ss = balans(6) + balans(7);
+    cnt2.style.display = '';
+    ret = get_last_count(7);
+    old_dat2.innerHTML = ret[0];
+    old_cnt2.value = ret[1];
+    new_cnt2.value = '';
+  }
+  else if( user.value == 8 ) { ss = balans(8) - balans(7); }
+  else { ss = balans(user.value); }
+
+  bal.innerHTML = '<span class="s12b">Баланс: ' + rub(ss) + '</span><br />\n';
+
+  dat.value = get_date();
+  ret = get_last_count(user.value);
+  old_dat.innerHTML = ret[0];
+  old_cnt.value = ret[1];
+  new_cnt.value = '';
+  sum_pay.value = '';
+  sum_tax.value = '';
+  port.innerHTML = 'Отчет:<br />';
+}
+
+function add_count()
+{
+  var tar = get_tarif();
+  var kvt = new_cnt.value - old_cnt.value;
+  var mes = 'Вы уверены, что хотите добавить показания:\n\n';
+  mes += 'Старые: ' + old_cnt.value + '\n';
+  mes += 'Новые: ' + new_cnt.value + '\n';
+  if( user.value == 6 )
+  {    mes += 'Старые2: ' + old_cnt2.value + '\n';
+    mes += 'Новые2: ' + new_cnt2.value + '\n';
+  	kvt += new_cnt2.value - old_cnt2.value;
+  }
+  var sum = kvt * tar;
+  mes += 'Всего кВт: ' + kvt + '\n';
+  mes += 'По тарифу: ' + tar + '\n';
+  mes += 'На сумму: ' + rub(sum);
+
+  if( confirm(mes) )
+  {    add_user_count(user.value, dat.value, old_cnt.value, new_cnt.value, tar);
+    if( user.value == 6 ) { add_user_count(7, dat.value, old_cnt2.value, new_cnt2.value, tar); }    show_balans();
+  }
+}
+
+function add_summ()
+{
+  var mes = 'Вы уверены, что хотите ввести платеж:\n\n';
+  mes += 'На сумму: ' + rub(sum_pay.value*1) + '\n';
+
+  if( confirm(mes) )
+  {
+    add_user_pay(user.value, dat.value, sum_pay.value);
+    show_balans();
+  }
+}
+
+function add_tax()
+{
+  var mes = 'Вы уверены, что хотите добавить платежный сбор:\n\n';
+  mes += 'На сумму: ' + rub(sum_tax.value*1) + '\n';
+
+  if( confirm(mes) )
+  {
+    add_user_tax(user.value, dat.value, sum_tax.value);
+    show_balans();
+  }
+}
+
+function portyanka()
+{
+  port.innerHTML = get_portianka(user.value, p_dept.value*1);
+}
+
+function show_wait()
+{
+  port.innerHTML = 'Идет поиск, подождите ...';
+}
+
+function main_init()
+{
+	//resize_window();
+	//window.onresize = resize_window; // Нехрен трогать
+	window.onbeforeunload = close_DB;
+	if( !open_DB() )
+	{
+		alert( 'База данных не найдена или повреждена!' );
+		window.close();
+	}
+	show_users();
+	show_balans();
+}
+</script>
+
+</HEAD>
+<BODY onload="main_init();">
+<div id="scr">
+aaa
+</div>
+
+<div id="bal">
+Баланс: <br />
+</div>
+
+Сегодня: <input type="text" name="dat" size="12"/><br />
+Старыая дата и цифры Новые цифры<br />
+<span id="old_dat">01.01.1900</span>
+<input type="text" name="old_cnt"  size="8"/>
+<input type="text" name="new_cnt"  size="8"/><br />
+<div id="cnt2">
+<span id="old_dat2">01.01.1900</span>
+<input type="text" name="old_cnt2"  size="8"/>
+<input type="text" name="new_cnt2"  size="8"/><br />
+</div>
+<input type="button" value="Ввести показания счетчика" onclick="add_count()"><br />
+<br />
+Сумму оплаты <input type="text" name="sum_pay"  size="12"/>
+<input type="button" value="Ввести" onclick="add_summ()"><br />
+<br />
+Сумму сбора <input type="text" name="sum_tax"  size="12"/>
+<input type="button" value="Добавить" onclick="add_tax()"><br />
+<br />
+Отчет за <input type="text" name="p_dept"  size="2" value="6"/> месяцев
+<input type="button" value="Получить" onmousedown="show_wait();" onclick="portyanka();"><br />
+<br />
+<div id="port">
+Отчет: <br />
+</div>
+
+</BODY>
+</HTML>

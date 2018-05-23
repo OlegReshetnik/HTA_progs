@@ -1,0 +1,113 @@
+<!DOCTYPE HTML>
+<HTML>
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<TITLE>Работа с прибором «ЭЛЕКТРОН Мини»</TITLE>
+<HTA:APPLICATION
+	 ID="hUs"
+	 APPLICATIONNAME="MiniElectronApp"
+	 BORDER="Thick"
+	 BORDERSTYLE="normal"
+	 CAPTION="yes"
+	 ICON="electron.ico"
+	 MAXIMIZEBUTTON="yes"
+	 MINIMIZEBUTTON="yes"
+	 SCROLL="auto"
+	 SHOWINTASKBAR="yes"
+	 SINGLEINSTANCE="yes"
+	 SYSMENU="yes"
+	 VERSION="1.0"
+	 WINDOWSTATE="normal" />
+
+<style type="text/css">
+body, tr, td, input, select { font-family: Verdana, Arial, Helvetica; font-size: 9pt; color: #000000; }
+form { margin: 0px; padding: 0px; }
+.ff { font-size: 8pt; }
+</style>
+
+<script type="text/javascript">
+
+function resize_window()
+{
+	var wW = 640, wH = 480;
+	window.resizeTo(wW, wH); // изменяем размер
+	window.moveTo(screen.width/2-wW/2, screen.height/2-wH/2); // окно в центр экрана
+}
+
+function setup() // Onload run
+{
+	resize_window();
+}
+
+/*
+function get_ports()
+{
+	var i, fso, f, mass, nums, ss = '';
+	var re = /\s+/;
+
+	fso = new ActiveXObject("WScript.Shell");
+	f = fso.Exec( "REG QUERY HKLM\\HARDWARE\\DEVICEMAP\\SERIALCOMM /s" );
+	mass = f.StdOut.ReadAll().split( re );
+	nums = mass.length;
+
+	for(i = 0; i < nums; i ++ )
+	{
+		if( mass[ i ].lastIndexOf( 'COM' ) >= 0 && mass[ i ].substr( 0, 1 ) != 'H' )
+		{
+			ss += '[' + Number( mass[ i ].substr( 3 ) ) + ']<br />';
+		}
+	}
+
+	list_ports.innerHTML = ss;
+
+	delete fso;
+}
+*/
+
+function get_ports()
+{
+	var ss = '';
+	var HKLM = 0x80000002;
+	var sRegPath = "HARDWARE\\DEVICEMAP\\SERIALCOMM";
+
+	try
+	{
+		var oLoc = new ActiveXObject("WbemScripting.SWbemLocator");
+		var oSvc = oLoc.ConnectServer(null, "root\\default");
+		var oReg = oSvc.Get("StdRegProv");
+		var oMethod = oReg.Methods_.Item("EnumValues");
+		var oInParam = oMethod.InParameters.SpawnInstance_();
+		oInParam.hDefKey = HKLM;
+		oInParam.sSubKeyName = sRegPath;
+		var oOutParam = oReg.ExecMethod_(oMethod.Name, oInParam);
+		var aNames = oOutParam.sNames.toArray();
+		var aTypes = oOutParam.Types.toArray();
+
+		oMethod = oReg.Methods_.Item("GetStringValue");
+		oInParam = oMethod.InParameters.SpawnInstance_();
+		oInParam.hDefKey = HKLM;
+		oInParam.sSubKeyName = sRegPath;
+
+		for( i = 0; i < aNames.length; i++ )
+		{
+			if( aTypes[i] == 1 )
+			{
+				oInParam.sValueName = aNames[i];
+				oOutParam = oReg.ExecMethod_(oMethod.Name, oInParam);
+				ss += aNames[i] + " = " + oOutParam.sValue + "<br />";
+			}
+		}
+	}
+	catch(err) { }
+	
+	delete oLoc;
+
+	list_ports.innerHTML = ss;
+}
+
+</script>
+</HEAD>
+<BODY onload="setup(); get_ports();">
+<div id="list_ports">port list here</div>
+</BODY>
+</HTML>

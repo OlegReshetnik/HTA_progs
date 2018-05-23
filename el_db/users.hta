@@ -1,0 +1,214 @@
+<!DOCTYPE HTML>
+<HTML>
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<TITLE>Редактор клиентов Ново-Разводная</TITLE>
+<HTA:APPLICATION
+     ID="hUs"
+     APPLICATIONNAME="EduserApp"
+     BORDER="Thick"
+     BORDERSTYLE="normal"
+     CAPTION="yes"
+     ICON="el.ico"
+     MAXIMIZEBUTTON="yes"
+     MINIMIZEBUTTON="yes"
+     SHOWINTASKBAR="yes"
+     SINGLEINSTANCE="yes"
+     SYSMENU="yes"
+     VERSION="1.0"
+     WINDOWSTATE="normal" />
+
+<style type="text/css">
+body, tr, td, input, select { font-family: Verdana, Arial, Helvetica; font-size: 10pt; color: #000055; }
+.rb { background-color: #CBEAEA; font-weight: bold; }
+.r0 { font-size: 10pt; background-color: #EBEBEB; }
+.r1 { font-size: 10pt; background-color: #FAFAFA; }
+form { margin: 0px; padding: 0px; }
+.s12b { font-size: 14pt; font-weight: bold; }
+.brd { border: .3pt #000000 solid; }
+</style>
+
+<script type="text/javascript">
+var chet=0;
+
+// **************************** Main DB ******************************
+var cn; // connection
+var rs; // recordset
+
+function open_DB()
+{
+	var fso = new ActiveXObject("WScript.Shell");
+	var cur_path = fso.CurrentDirectory + "\\";
+	delete fso;
+
+	var mdb = "el_db.mdb";
+	var strConn = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" + cur_path + mdb + ";Persist Security Info=False"; // Подключаем к базе
+
+	try {
+		cn = new ActiveXObject("ADODB.Connection");
+		rs = new ActiveXObject("ADODB.Recordset");
+		cn.Open(strConn);
+	}
+	catch(e) { return 0; }
+	return 1;
+}
+
+function close_DB()
+{
+	cn.Close();
+	delete rs;
+	delete cn;
+}
+// *******************************************************************
+
+function get_date()
+{
+  var td = new Date();
+  var yy = td.getFullYear();
+  var mm = td.getMonth()+1;
+  var dd = td.getDate();
+
+  if( mm < 10 ) mm = '0'+mm;
+  if( dd < 10 ) dd = '0'+dd;
+
+  return dd + '.' + mm + '.' + yy;
+}
+
+function show_users()
+{
+  var SQL, max_id, str;
+
+  SQL = "SELECT max(u_id) FROM users";
+  rs.Open(SQL, cn);
+  max_id = rs.Fields(0).Value + 1;
+  rs.Close();
+
+  str = '<select name="user" onchange="show_info()">\n';
+  str += '<option value="' + max_id + '">Новый клиент...</option>\n';
+
+  SQL = "SELECT u_id, u_name FROM users";
+  rs.Open(SQL, cn);
+  while (!rs.eof)
+  {    str += '<option value="' + rs.Fields(0).Value + '"';
+    if( rs.Fields(0).Value == 1 ) { str += ' selected'; }
+    str += '>' + rs.Fields(1).Value + '</option>\n';
+    rs.MoveNext();
+  }
+  str += '</select>\n';
+  ulist.innerHTML = str;
+
+  rs.Close();
+}
+
+function update_user(new_id, u_id, u_name, u_tax, u_phone, u_phone2, u_mail, u_active)
+{
+  var cmd;
+
+  if( u_name == '' ) return;
+  if( u_tax == '' ) u_tax = 0;
+  if( u_phone == '' ) u_phone = '0';
+  if( u_phone2 == '' ) u_phone = '0';
+  if( u_mail == '' ) u_mail = '0';
+
+  if( new_id == 1 )
+  {  	cmd = "INSERT INTO users (u_id, u_name, u_tax, u_phone, u_phone2, u_mail, u_active) VALUES (";
+  	cmd += u_id + ", ";
+  	cmd += "'" + u_name + "', ";
+  	cmd += u_tax + ", ";
+  	cmd += "'" + u_phone + "', ";
+  	cmd += "'" + u_phone2 + "', ";
+  	cmd += "'" + u_mail + "', ";
+  	cmd += u_active;
+  	cmd += ")";
+  }
+  else
+  {  	cmd = "UPDATE users SET ";
+  	cmd += "u_name = '" + u_name + "'";
+  	cmd += ", u_tax = " + u_tax;
+  	cmd += ", u_phone = '" + u_phone + "'";
+  	cmd += ", u_phone2 = '" + u_phone2 + "'";
+  	cmd += ", u_mail = '" + u_mail + "'";
+  	cmd += ", u_active = " + u_active;
+  	cmd += " WHERE u_id = " + u_id;
+  }
+  cn.Execute(cmd);
+}
+
+function show_info()
+{
+  var SQL, usr;
+
+  usr = user.value;
+  SQL = "SELECT u_id, u_name, u_tax, u_phone, u_phone2, u_mail, u_active FROM users WHERE u_id = " + usr;
+  rs.Open(SQL, cn);
+
+  u_id.value = usr;
+  if( rs.eof )
+  {  	new_id.value = 1;
+  	u_name.value = '';
+    u_tax.value = '0';
+    u_phone.value = '0';
+    u_phone2.value = '0';
+    u_mail.value = '0';
+    u_active.checked = 0;
+  }
+  else
+  {  	new_id.value = 0;
+  	u_name.value = rs.Fields(1).Value; // 0 - u_id
+    u_tax.value = rs.Fields(2).Value;
+    u_phone.value = rs.Fields(3).Value;
+    u_phone2.value = rs.Fields(4).Value;
+    u_mail.value = rs.Fields(5).Value;
+    u_active.checked = rs.Fields(6).Value;
+  }
+
+  rs.Close();
+}
+
+function write_user()
+{
+  var mes = 'Вы уверены, что хотите изменить данные:\n\n';
+  mes += 'Клиента: ' + u_name.value + '\n';
+
+  if( confirm(mes) )
+  {
+    update_user(new_id.value, u_id.value, u_name.value, u_tax.value, u_phone.value, u_phone2.value, u_mail.value, u_active.checked);
+    show_users();
+    show_info();
+  }
+}
+
+function main_init()
+{
+	//resize_window();
+	//window.onresize = resize_window; // Нехрен трогать
+	window.onbeforeunload = close_DB;
+	if( !open_DB() )
+	{
+		alert( 'База данных не найдена или повреждена!' );
+		window.close();
+	}
+	show_users();
+	show_info();
+}
+</script>
+
+</HEAD>
+<BODY onload="main_init();">
+<div id="ulist">
+Users list here
+</div>
+
+<input name="new_id" type="hidden">
+<input name="u_id" type="hidden">
+Ф.И.О. <input name="u_name" type="text" size="30"><br />
+Сборы: <input name="u_tax" type="text" size="7"> руб./мес.<br />
+Телефон1: <input name="u_phone" type="text"><br />
+Телефон2: <input name="u_phone2" type="text"><br />
+E-mail: <input name="u_mail" type="text" size="25"><br />
+Активен: <input name="u_active" type="checkbox"><br />
+<br />
+<input type="button" value="Записать изменения" onclick="write_user()"><br />
+
+</BODY>
+</HTML>

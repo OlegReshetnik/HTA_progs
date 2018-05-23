@@ -1,0 +1,315 @@
+<!DOCTYPE HTML>
+<HTML>
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<TITLE>Касса КТП Ново-Разводная</TITLE>
+<HTA:APPLICATION
+     ID="hKassa"
+     APPLICATIONNAME="KassaApp"
+     BORDER="Thick"
+     BORDERSTYLE="normal"
+     CAPTION="yes"
+     ICON="el.ico"
+     MAXIMIZEBUTTON="yes"
+     MINIMIZEBUTTON="yes"
+     SHOWINTASKBAR="yes"
+     SINGLEINSTANCE="yes"
+     SYSMENU="yes"
+     VERSION="1.0"
+     WINDOWSTATE="normal" />
+
+<style type="text/css">
+body, tr, td, input, select { font-family: Verdana, Arial, Helvetica; font-size: 10pt; color: #000055; }
+.rb { background-color: #CBEAEA; font-weight: bold; }
+.r0 { font-size: 10pt; background-color: #EBEBEB; }
+.r1 { font-size: 10pt; background-color: #FAFAFA; }
+form { margin: 0px; padding: 0px; }
+.s12b { font-size: 14pt; font-weight: bold; }
+.brd { border: .3pt #000000 solid; }
+</style>
+
+<script type="text/javascript">
+var chet=0;
+
+// **************************** Main DB ******************************
+var cn; // connection
+var rs; // recordset
+
+function open_DB()
+{
+	var fso = new ActiveXObject("WScript.Shell");
+	var cur_path = fso.CurrentDirectory + "\\";
+	delete fso;
+
+	var mdb = "el_db.mdb";
+	var strConn = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" + cur_path + mdb + ";Persist Security Info=False"; // Подключаем к базе
+
+	try {
+		cn = new ActiveXObject("ADODB.Connection");
+		rs = new ActiveXObject("ADODB.Recordset");
+		cn.Open(strConn);
+	}
+	catch(e) { return 0; }
+	return 1;
+}
+
+function close_DB()
+{
+	cn.Close();
+	delete rs;
+	delete cn;
+}
+// *******************************************************************
+
+function get_date()
+{
+  var td = new Date();
+  var yy = td.getFullYear();
+  var mm = td.getMonth()+1;
+  var dd = td.getDate();
+
+  if( mm < 10 ) mm = '0'+mm;
+  if( dd < 10 ) dd = '0'+dd;
+
+  return dd + '.' + mm + '.' + yy;
+}
+
+function add_kassa_pay(k_data, k_sum, k_text)
+{
+  var cmd = "INSERT INTO kassa (k_data, k_sum, k_text) VALUES ('" + k_data + "', " + k_sum + ", '" + k_text + "')";
+  cn.Execute(cmd);
+}
+
+function kassa_balans()
+{  var p_sum, s_sum, k_sum, SQL;
+
+  SQL = "SELECT sum( p_sum ) FROM pays";
+  rs.Open(SQL, cn);
+  p_sum = rs.Fields(0).Value;
+  rs.Close();
+
+  SQL = "SELECT sum( s_sum ) FROM sbyt_pays";
+  rs.Open(SQL, cn);
+  s_sum = rs.Fields(0).Value;
+  rs.Close();
+
+  SQL = "SELECT sum( k_sum ) FROM kassa";
+  rs.Open(SQL, cn);
+  k_sum = rs.Fields(0).Value;
+  rs.Close();
+
+  return ( p_sum - s_sum - k_sum );
+}
+
+function rub(val)
+{
+  var str = val.toFixed(0);
+  return str.replace(/(\d{1,3}(?=(\d{3})+(?:\.\d|\b)))/g,"\$1 ") + ' р.';
+}
+
+function show_kassa_balans()
+{
+  var ss;
+
+  bal.innerHTML = '<span class="s12b">В кассе: ' + rub(kassa_balans()) + '</span><br />\n';
+
+  dat.value = get_date();
+}
+
+function add_summ()
+{
+  var mes = 'Вы уверены, что хотите ввести операцию по кассе:\n\n';
+  mes += 'На сумму: ' + rub(sum_pay.value*1) + '\n';
+  mes += 'Описание: ' + desk.value;
+
+  if( confirm(mes) )
+  {
+    add_kassa_pay(dat.value, sum_pay.value, desk.value);
+    show_kassa_balans();
+  }
+}
+
+// SELECT sum(p_sum) FROM pays WHERE DatePart('yyyy',p_data) = 2012 AND DatePart('m',p_data) = 3;
+// SELECT u_id, p_sum FROM pays WHERE DatePart('yyyy',p_data) = 2012 AND DatePart('m',p_data) = 3;
+// SELECT users.u_name, pays.p_sum FROM pays INNER JOIN users ON pays.u_id = users.u_id WHERE DatePart('yyyy',p_data)=2012 AND DatePart('m',p_data)=3;
+// SELECT sum(s_sum) FROM sbyt_pays WHERE DatePart('yyyy',s_data) = 2012 AND DatePart('m',s_data) = 3;
+// SELECT s_sum FROM sbyt_pays WHERE DatePart('yyyy',s_data) = 2012 AND DatePart('m',s_data) = 3;
+// SELECT k_sum FROM kassa WHERE DatePart('yyyy',k_data) = 2011 AND DatePart('m',k_data) = 11;
+//
+function get_one_kassa_port(m, y)
+{
+  var mn = ['','январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь',''];
+  var SQL;
+  var p_sum, s_sum, k_sum, c_str, str;
+
+  chet++; chet %= 2;
+  str = '<tr class="r' + chet + '"><td align="right">' + mn[m] + ' ' + y + '</td><td>';
+
+  SQL = "SELECT sum(p_sum) FROM pays WHERE DatePart('yyyy',p_data) = " + y + " AND DatePart('m',p_data) = " + m;
+  rs.Open(SQL, cn);
+  if( !rs.eof )
+  {  	p_sum = rs.Fields(0).Value;
+    if( p_sum == null ) p_sum = 0;
+  	c_str = rub(p_sum);
+  }
+  else { c_str = '&nbsp;'; p_sum = 0; }
+  rs.Close();
+  str += c_str + '</td><td>';
+
+  SQL = "SELECT sum(s_sum) FROM sbyt_pays WHERE DatePart('yyyy',s_data) = " + y + " AND DatePart('m',s_data) = " + m;
+  rs.Open(SQL, cn);
+  if( !rs.eof )
+  {  	s_sum = rs.Fields(0).Value;
+    if( s_sum == null ) s_sum = 0;
+  	c_str = rub(s_sum);
+  }
+  else { c_str = '&nbsp;'; s_sum = 0; }
+  rs.Close();
+  str += c_str + '</td><td>';
+
+  SQL = "SELECT sum(k_sum) FROM kassa WHERE DatePart('yyyy',k_data) = " + y + " AND DatePart('m',k_data) = " + m;
+  rs.Open(SQL, cn);
+  if( !rs.eof )
+  {  	k_sum = rs.Fields(0).Value;
+    if( k_sum == null ) k_sum = 0;
+  	c_str = rub(k_sum);
+  }
+  else { c_str = '&nbsp;'; k_sum = 0; }
+  rs.Close();
+  str += c_str + '</td><td>' + rub(p_sum-s_sum-k_sum) + '</td></tr>';
+
+  return str;
+}
+
+function get_one_kassa_port_det(m, y)
+{
+  var mn = ['','январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь',''];
+  var SQL;
+  var dat, nam, sum, c_str, str;
+
+  chet++; chet %= 2;
+  str = '<tr class="r' + chet + '"><td align="right">' + mn[m] + ' ' + y + '</td><td>';
+
+  SQL = "SELECT DatePart('d',pays.p_data), users.u_name, pays.p_sum FROM pays INNER JOIN users ON pays.u_id = users.u_id WHERE DatePart('yyyy',p_data) = " + y + " AND DatePart('m',p_data) = " + m;
+  rs.Open(SQL, cn);
+  c_str = '';
+  while( !rs.eof )
+  {
+    dat = rs.Fields(0).Value;
+    nam = rs.Fields(1).Value;
+    sum = rub(rs.Fields(2).Value);
+    c_str += dat + ': ' + nam + ' -> ' + sum + '<br />';
+    rs.MoveNext();
+  }
+  rs.Close();
+  if( c_str == '' ) { c_str = '&nbsp;'; }
+  str += c_str + '</td><td>';
+
+  SQL = "SELECT DatePart('d',s_data), s_sum FROM sbyt_pays WHERE DatePart('yyyy',s_data) = " + y + " AND DatePart('m',s_data) = " + m;
+  rs.Open(SQL, cn);
+  c_str = '';
+  while( !rs.eof )
+  {
+    dat = rs.Fields(0).Value;
+    sum = rub(rs.Fields(1).Value);
+    c_str += dat + ': ' + sum + '<br />';
+    rs.MoveNext();
+  }
+  rs.Close();
+  if( c_str == '' ) { c_str = '&nbsp;'; }
+  str += c_str + '</td><td>';
+
+  SQL = "SELECT DatePart('d',k_data), k_sum, k_text FROM kassa WHERE DatePart('yyyy',k_data) = " + y + " AND DatePart('m',k_data) = " + m;
+  rs.Open(SQL, cn);
+  c_str = '';
+  while( !rs.eof )
+  {
+    dat = rs.Fields(0).Value;
+    sum = rub(rs.Fields(1).Value);
+    nam = rs.Fields(2).Value;
+    c_str += dat + ': ' + sum + ' - ' + nam + '<br />';
+    rs.MoveNext();
+  }
+  rs.Close();
+  if( c_str == '' ) { c_str = '&nbsp;'; }
+
+  str += c_str + '</td></tr>';
+
+  return str;
+}
+
+function get_kassa_portianka(dept, details)
+{
+  var td = new Date();
+  var cm = td.getMonth()+1;
+  var cy = td.getFullYear();
+  var mm, yy;
+  var str;
+
+  str = '<table border=1 cellpadding=5 cellspacing=0><tr class="rb">';
+  str += '<td>Месяц</td><td>Получено за эл-во</td><td>Выплачено за КТП</td><td>Прочее</td>';
+  if( !details ) { str += '<td>Баланс</td>'; }
+  str += '</tr>';
+
+  dept--;
+  while( dept >= 0 )
+  {
+    mm = cm - dept; yy = cy;
+    while( mm <= 0 ) { yy--; mm += 12; }
+    if( details ) { str += get_one_kassa_port_det(mm, yy); }
+    else { str += get_one_kassa_port(mm, yy); }
+    dept --;
+  }
+  str += '</table>\n';
+
+  return str;
+}
+
+function portyanka()
+{
+  port.innerHTML = get_kassa_portianka(p_dept.value*1, p_det.checked);
+}
+
+function show_wait()
+{
+  port.innerHTML = 'Идет поиск, подождите ...';
+}
+
+function main_init()
+{
+	//resize_window();
+	//window.onresize = resize_window; // Нехрен трогать
+	window.onbeforeunload = close_DB;
+	if( !open_DB() )
+	{
+		alert( 'База данных не найдена или повреждена!' );
+		window.close();
+	}
+	show_kassa_balans();
+}
+</script>
+
+</HEAD>
+<BODY onload="main_init();">
+<div id="bal">
+Баланс: <br />
+</div>
+
+Сегодня: <input type="text" name="dat" size="12"/><br />
+Сумму из кассы выдать <input type="text" name="sum_pay"  size="12"/><br />
+(отрицательное число - это внесение)<br />
+<input type="text" name="desk"  size="70"/><br />
+(описание)
+<input type="button" value="Ввести операцию" onclick="add_summ()"><br />
+<br />
+Отчет за <input type="text" name="p_dept"  size="2" value="6"/> месяцев
+<input type="button" value="Получить" onmousedown="show_wait();" onclick="portyanka();">
+<input name="p_det" type="checkbox"> детализация
+<br />
+<br />
+<div id="port">
+Отчет: <br />
+</div>
+
+</BODY>
+</HTML>

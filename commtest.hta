@@ -1,0 +1,84 @@
+<!DOCTYPE HTML>
+<HTML>
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<TITLE>Com Port Test</TITLE>
+<HTA:APPLICATION
+     ID="hUs"
+     APPLICATIONNAME="BiorsApp"
+     BORDER="Thick"
+     BORDERSTYLE="normal"
+     CAPTION="yes"
+     ICON="biors.ico"
+     MAXIMIZEBUTTON="yes"
+     MINIMIZEBUTTON="yes"
+     SHOWINTASKBAR="yes"
+     SINGLEINSTANCE="yes"
+     SYSMENU="yes"
+     VERSION="1.0"
+     WINDOWSTATE="normal" />
+
+<style type="text/css">
+body, tr, td, input, select { font-family: Verdana, Arial, Helvetica; font-size: 8pt; color: #000055; }
+.rb { background-color: #CBEAEA; font-weight: bold; }
+.r0 { font-size: 8pt; background-color: #EBEBEB; }
+.r1 { font-size: 8pt; background-color: #FAFAFA; }
+form { margin: 0px; padding: 0px; }
+.s12b { font-size: 12pt; font-weight: bold; }
+.brd { border: .3pt #000000 solid; }
+</style>
+
+<script type="text/javascript">
+
+
+ var comm = null;
+       try
+       {
+          if(!(comm = new ActiveXObject("MSCommLib.MSComm")))
+             throw "MSCOMMLib.MSComm";
+       }
+       catch(e)
+       {           
+          try
+          {
+             if(!(comm = new ActiveXObject("MSCommLib.MSComm.1")))
+               throw "MSCOMMLib.MSComm.1";
+          }
+          catch(e)
+          {
+            alert("Error: Install the "+e+" ActivX ");
+          }
+       }
+
+       if(comm)
+       {
+          comm.CommPort = 4;
+          comm.Settings = "115200,N,8,1";
+          comm.PortOpen = true;
+          alert('dialling');
+//          comm.Output = "C";
+          comm.Output = "10.0\n"
+          comm.PortOpen = false;
+       }
+
+</script>
+
+</HEAD>
+<BODY onload="show_users(); show_info();">
+<div id="ulist">
+Users list here
+</div>
+
+<input name="new_id" type="hidden">
+<input name="u_id" type="hidden">
+Ф.И.О. <input name="u_name" type="text" size="30"><br />
+Сборы: <input name="u_tax" type="text" size="7"> руб./мес.<br />
+Телефон1: <input name="u_phone" type="text"><br />
+Телефон2: <input name="u_phone2" type="text"><br />
+E-mail: <input name="u_mail" type="text" size="25"><br />
+Активен: <input name="u_active" type="checkbox"><br />
+<br />
+<input type="button" value="Записать изменения" onclick="write_user()"><br />
+
+</BODY>
+</HTML>

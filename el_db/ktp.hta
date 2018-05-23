@@ -1,0 +1,381 @@
+<!DOCTYPE HTML>
+<HTML>
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<TITLE>Программа учета КТП Ново-Разводная</TITLE>
+<HTA:APPLICATION
+     ID="hElKtp"
+     APPLICATIONNAME="KtpApp"
+     BORDER="Thick"
+     BORDERSTYLE="normal"
+     CAPTION="yes"
+     ICON="el.ico"
+     MAXIMIZEBUTTON="yes"
+     MINIMIZEBUTTON="yes"
+     SHOWINTASKBAR="yes"
+     SINGLEINSTANCE="yes"
+     SYSMENU="yes"
+     VERSION="1.0"
+     WINDOWSTATE="normal" />
+
+<style type="text/css">
+body, tr, td, input, select { font-family: Verdana, Arial, Helvetica; font-size: 10pt; color: #000055; }
+.rb { background-color: #CBEAEA; font-weight: bold; }
+.r0 { font-size: 10pt; background-color: #EBEBEB; }
+.r1 { font-size: 10pt; background-color: #FAFAFA; }
+form { margin: 0px; padding: 0px; }
+.s12b { font-size: 14pt; font-weight: bold; }
+.brd { border: .3pt #000000 solid; }
+</style>
+
+<script type="text/javascript">
+var chet=0;
+
+// **************************** Main DB ******************************
+var cn; // connection
+var rs; // recordset
+
+function open_DB()
+{
+	var fso = new ActiveXObject("WScript.Shell");
+	var cur_path = fso.CurrentDirectory + "\\";
+	delete fso;
+
+	var mdb = "el_db.mdb";
+	var strConn = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" + cur_path + mdb + ";Persist Security Info=False"; // Подключаем к базе
+
+	try {
+		cn = new ActiveXObject("ADODB.Connection");
+		rs = new ActiveXObject("ADODB.Recordset");
+		cn.Open(strConn);
+	}
+	catch(e) { return 0; }
+	return 1;
+}
+
+function close_DB()
+{
+	cn.Close();
+	delete rs;
+	delete cn;
+}
+// *******************************************************************
+
+function get_date()
+{
+  var td = new Date();
+  var yy = td.getFullYear();
+  var mm = td.getMonth()+1;
+  var dd = td.getDate();
+
+  if( mm < 10 ) mm = '0'+mm;
+  if( dd < 10 ) dd = '0'+dd;
+
+  return dd + '.' + mm + '.' + yy;
+}
+
+function add_ktp_count(k_data, k_old, k_new, k_mul, k_tarif, k_add)
+{
+  var cmd = "INSERT INTO ktp (k_data, k_old, k_new, k_mul, k_tarif, k_add) VALUES (";
+  cmd += "'" + k_data + "', " + k_old + ", " + k_new + ", " + k_mul + ", " + k_tarif + ", " + k_add + ")";
+  cn.Execute(cmd);
+}
+
+function add_sbyt_pay(s_data, s_sum)
+{
+  var cmd = "INSERT INTO sbyt_pays (s_data, s_sum) VALUES ('" + s_data + "', " + s_sum + ")";
+  cn.Execute(cmd);
+}
+
+function get_last_ktp_count()
+{
+  var SQL = "SELECT TOP 1 k_new FROM ktp ORDER BY k_data DESC";
+  rs.Open(SQL, cn);
+  var ret = rs.Fields(0).Value;
+  rs.Close();
+  return ret;
+}
+
+function get_last_ktp() // k_data, k_old, k_new, k_mul, k_tarif, k_add
+{
+  var ret = [];
+  var SQL = "SELECT TOP 1 Format(k_data,'dd.mm.yyyy'), k_old, k_new, k_mul, k_tarif, k_add FROM ktp ORDER BY k_data DESC";
+  rs.Open(SQL, cn);
+
+  ret[0] = rs.Fields(0).Value;
+  ret[1] = rs.Fields(1).Value;
+  ret[2] = rs.Fields(2).Value;
+  ret[3] = rs.Fields(3).Value;
+  ret[4] = rs.Fields(4).Value;
+  ret[5] = rs.Fields(5).Value;
+
+  rs.Close();
+  return ret;
+}
+
+function get_ktp_tarif() // mul, tar, add
+{
+  var mul, tar, add, SQL;
+  var ret = [];
+
+  SQL = "SELECT s_value FROM settings WHERE s_name = 'ktp_mul'";
+  rs.Open(SQL, cn);
+  mul = rs.Fields(0).Value;
+  rs.Close();
+
+  SQL = "SELECT s_value FROM settings WHERE s_name = 'tarif'";
+  rs.Open(SQL, cn);
+  tar = rs.Fields(0).Value * 1.0;
+  rs.Close();
+
+  SQL = "SELECT s_value FROM settings WHERE s_name = 'ktp_add'";
+  rs.Open(SQL, cn);
+  add = rs.Fields(0).Value / 100.0;
+  rs.Close();
+
+  ret[0]=mul; ret[1]=tar; ret[2]=add;
+  return ret;
+}
+
+function ktp_balans()
+{  var cnt, pay, SQL;
+
+  SQL = "SELECT sum( (k_new-k_old)*k_mul*k_tarif*(1+k_add) ) FROM ktp";
+  rs.Open(SQL, cn);
+  cnt = rs.Fields(0).Value;
+  rs.Close();
+
+  var SQL = "SELECT sum( s_sum ) FROM sbyt_pays";
+  rs.Open(SQL, cn);
+  pay = rs.Fields(0).Value;
+  rs.Close();
+
+  return (pay - cnt);
+}
+
+function get_one_ktp_port(m, y)
+{
+  var mn = ['','январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь',''];
+  var SQL;
+  var oldc, newc, mul, add, dt, kv, cr, cr1, tar, sum, csum, psum, cd, pd;
+  var c_str, p_str, str;
+
+  chet++; chet %= 2;
+  var str = '<tr class="r' + chet + '"><td align="right">' + mn[m] + ' ' + y + '</td><td>';
+
+  SQL = "SELECT DatePart('d',k_data), k_old, k_new, k_mul, k_tarif, k_add FROM ktp WHERE DatePart('yyyy',k_data) = " + y + " AND DatePart('m',k_data) = " + m;
+  rs.Open(SQL, cn);
+  c_str = ''; csum = 0;
+  while( !rs.eof )
+  {
+    cd = rs.Fields(0).Value;
+    oldc = rs.Fields(1).Value;
+    newc = rs.Fields(2).Value;
+    mul = rs.Fields(3).Value;
+    tar = rs.Fields(4).Value;
+    add = rs.Fields(5).Value;
+    dt = newc - oldc;
+    kv = dt * mul;
+    cr = kv * tar;
+    cr1 = cr * (1 + add);
+    add *= 100;
+    csum += cr1;
+    cr = rub(cr);
+    cr1 = rub(cr1);
+    tar = tar.toFixed(4);
+    add = add.toFixed(2);
+    c_str += cd+': ('+newc+'-'+oldc+')-> '+dt+' x '+mul+'->'+kv+' x '+tar+'->'+cr+' + '+add+'% = '+cr1+'<br />';
+    rs.MoveNext();
+  }
+  rs.Close();
+  if( c_str == '' ) { c_str = '&nbsp;'; }
+  str += c_str + '</td><td>' + rub(csum) + '</td><td>';
+
+  SQL = "SELECT DatePart('d',s_data), s_sum FROM sbyt_pays WHERE DatePart('yyyy',s_data) = " + y + " AND DatePart('m',s_data) = " + m;
+  rs.Open(SQL, cn);
+  p_str = ''; psum = 0;
+  while( !rs.eof )
+  {
+    pd = rs.Fields(0).Value;
+    sum = rs.Fields(1).Value;
+    psum += sum;
+    sum = rub(sum);
+    p_str += pd + ': ' + sum + '<br />';
+    rs.MoveNext();
+  }
+  rs.Close();
+  if( p_str == '' ) { p_str = '&nbsp;'; }
+  str += p_str + '</td><td>' + rub(psum) + '</td></tr>';
+
+  return str;
+}
+
+function get_ktp_portianka(dept)
+{
+  var td = new Date();
+  var cm = td.getMonth()+1;
+  var cy = td.getFullYear();
+  var mm, yy;
+  var str;
+
+  str = '<table border=1 cellpadding=5 cellspacing=0><tr class="rb">';
+  str += '<td>Месяц</td><td>Дата: Показания x Множ х Тариф + Потери</td><td>Итого</td><td>Оплачено</td><td>Итого</td></tr>';
+  dept--;
+  while( dept >= 0 )
+  {
+    mm = cm - dept; yy = cy;
+    while( mm <= 0 ) { yy--; mm += 12; }
+    str += get_one_ktp_port(mm, yy);
+    dept --;
+  }
+  str += '</table>\n';
+
+  return str;
+}
+
+function rub(val)
+{
+  var str = val.toFixed(0);
+  return str.replace(/(\d{1,3}(?=(\d{3})+(?:\.\d|\b)))/g,"\$1 ") + ' р.';
+}
+
+function show_ktp_balans()
+{
+  var ss;
+
+  bal.innerHTML = '<span class="s12b">КТП Баланс: ' + rub(ktp_balans()) + '</span><br />\n';
+
+  dat.value = get_date();
+  old_cnt.value = get_last_ktp_count();
+  new_cnt.value = '';
+  sum_pay.value = '';
+  port.innerHTML = 'Отчет:<br />';
+}
+
+function add_count()
+{
+  var tar = get_ktp_tarif(); // mul, tar, add
+  var kvt = (new_cnt.value - old_cnt.value) * tar[0];
+  var mes = 'Вы уверены, что хотите добавить показания КТП:\n\n';
+  mes += 'Старые: ' + old_cnt.value + '\n';
+  mes += 'Новые: ' + new_cnt.value + '\n';
+  mes += 'Множитель: ' + tar[0] + '\n';
+  var sum = kvt * tar[1] * (1+tar[2]);
+  mes += 'Всего кВт: ' + kvt + '\n';
+  mes += 'По тарифу: ' + tar[1] + '\n';
+  mes += 'С потерями: ' + tar[2] + '\n';
+  mes += 'На сумму: ' + rub(sum);
+
+  if( confirm(mes) )
+  {    add_ktp_count(dat.value, old_cnt.value, new_cnt.value, tar[0], tar[1], tar[2]);
+    show_ktp_balans();
+  }
+}
+
+function add_summ()
+{
+  var mes = 'Вы уверены, что хотите ввести платеж за КТП:\n\n';
+  mes += 'На сумму: ' + rub(sum_pay.value*1) + '\n';
+
+  if( confirm(mes) )
+  {
+    add_sbyt_pay(dat.value, sum_pay.value);
+    show_ktp_balans();
+  }
+}
+
+function pop_akt(k_data, k_old, k_new, k_mul, k_tarif, k_add)
+{
+  var str;
+  var dif = k_new - k_old;
+  var kvt = dif * k_mul;
+  var rub1 = kvt * k_tarif;
+  var rub2 = rub1 * (1 + k_add);
+  k_tarif = k_tarif.toFixed(4);
+  k_add = k_add.toFixed(4);
+  var pop_win=window.open("about:blank", "_blank", "menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes,status=no");
+
+  str  = '<html><head><title>Акт расхода электроэнергии КТП</title>';
+  str += '<style type="text/css">body, tr, td, input, select { font-family: Verdana, Arial, Helvetica; }</style>';
+  str += '</head><body onload="print()"><b>Акт расхода электроэнергии на КТП</b><br /><br />';
+  str += 'Договор № <b>6568</b>, (Кобзарь С.А.)<br />Код точки 000191<br /><br />';
+  str += 'Дата: ' + k_data + '<br /><br />Показания:<br />';
+  str += '<table border=1 bordercolor=black cellpadding=5 cellspacing=0><tr>';
+  str += '<td>Старые</td><td>Новые</td><td>Разница</td><td>Множ.</td><td>КВТ/ч</td>';
+  str += '<td>Тариф</td><td>Итого</td><td>Потери</td><td>Сумма</td></tr>';
+  str += '<tr><td>'+k_old+'</td><td>'+k_new+'</td><td>'+dif+'</td><td>'+k_mul+'</td><td>'+kvt+'</td>';
+  str += '<td>'+k_tarif+'</td><td>'+rub(rub1)+'</td><td>'+(k_add*100)+' %</td><td>'+rub(rub2)+'</td></tr>';
+  str += '</table><br /><br />';
+  str += 'Акт сдал: __________________________<br /><br /><br />';
+  str += 'Акт принял: ________________________<br />';
+  str += '</body></html>';
+
+  pop_win.document.write(str);
+
+  return pop_win;
+}
+
+function my_pop_akt()
+{
+  var get = get_last_ktp() // k_data, k_old, k_new, k_mul, k_tarif, k_add
+  pop_akt(get[0], get[1], get[2], get[3], get[4], get[5]);
+  port.innerHTML = 'Готово.';
+}
+
+function pop_wait()
+{
+  port.innerHTML = 'Формируется отчет, подождите ...';
+}
+
+function portyanka()
+{
+  port.innerHTML = get_ktp_portianka(p_dept.value*1);
+}
+
+function show_wait()
+{
+  port.innerHTML = 'Идет поиск, подождите ...';
+}
+
+function main_init()
+{
+	//resize_window();
+	//window.onresize = resize_window; // Нехрен трогать
+	window.onbeforeunload = close_DB;
+	if( !open_DB() )
+	{
+		alert( 'База данных не найдена или повреждена!' );
+		window.close();
+	}
+	show_ktp_balans();
+}
+</script>
+
+</HEAD>
+<BODY onload="main_init();">
+Работа с КТП: Договор № 6568, Код точки 000191<br />
+
+<div id="bal">
+Баланс: <br />
+</div>
+
+Сегодня: <input type="text" name="dat" size="12"/><br />
+Старые цифры &nbsp;&nbsp;Новые цифры<br />
+<input type="text" name="old_cnt"  size="12"/>
+<input type="text" name="new_cnt"  size="12"/><br />
+<input type="button" value="Ввести показания КТП" onclick="add_count()"><br />
+<br />
+Оплатил за КТП <input type="text" name="sum_pay"  size="12"/>
+<input type="button" value="Ввести" onclick="add_summ()"><br />
+<br />
+<input type="button" value="Вывести последний АКТ расхода" onmousedown="pop_wait();" onclick="my_pop_akt();"><br />
+<br />
+Отчет за <input type="text" name="p_dept"  size="2" value="6"/> месяцев
+<input type="button" value="Получить" onmousedown="show_wait();" onclick="portyanka();"><br />
+<br />
+<div id="port">
+Отчет: <br />
+</div>
+
+</BODY>
+</HTML>
